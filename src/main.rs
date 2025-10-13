@@ -2,12 +2,14 @@ use std::convert::Infallible;
 use clap::{Parser, Subcommand};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::Duration;
-use hyper::{Client, Request, Body};
+use hyper::{Client, Request, Body, Response, StatusCode};
+use hyper::body::HttpBody;
 use hyper::client::HttpConnector;
 use hyper::header::{CONNECTION, UPGRADE, CONTENT_TYPE};
 use hyper::upgrade::Upgraded;
 use serde_json::json;
 use tokio::signal;
+use tracing_subscriber::fmt::format;
 
 // todo: should this be static?
 const AGENT_ID: &str = "128393847599";
@@ -25,6 +27,11 @@ enum Commands {
     Tcp { port: u16 },
     /// Expose an HTTP port
     Http { port: u16 },
+}
+
+#[derive(serde::Deserialize)]
+struct RegisterResponse {
+    endpoint: String,
 }
 
 // "dyn" is used since we do not know the exact error type at compile time.
@@ -65,7 +72,13 @@ async fn connect_to_server(port: u16) -> Result<(), Infallible> {
         .header(UPGRADE, "Agent-protocol")
         .body(Body::from(register_request_body)).unwrap();
 
-    client.request(register_request).await.expect("❌ Failed to connect to the tunnel server. Please check your internet connection.");
+    let register_response = client.request(register_request).await.expect("❌ Failed to connect to the tunnel server. Please check your internet connection.");
+    let (_, body) = register_response.into_parts();
+    let register_response_body = body.collect().await.expect("❌ Failed to connect to the tunnel server. Please check your internet connection.").to_bytes();
+    let parsed_register_response_body: RegisterResponse = serde_json::from_slice(&register_response_body).expect("❌ Failed to connect to the tunnel server. Please check your internet connection.");
+
+    let public_endpoint = format!("{}", parsed_register_response_body.endpoint);
+    println!("🛜 Your public endpoint: {}", public_endpoint);
 
     let body = json!({
         "agent_id": AGENT_ID
